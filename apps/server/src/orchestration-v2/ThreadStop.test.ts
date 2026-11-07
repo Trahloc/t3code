@@ -1408,13 +1408,16 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
           ? undefined
           : { status: confirmedStatus, completedAt: now, result: "Actual provider outcome" };
       const commandId = CommandId.make("stop-native-child");
-      yield* orchestrator.dispatch({
-        type: "subagent.stop",
-        commandId,
-        threadId,
-        runId: run.id,
-        subagentId: subagent.id,
-      });
+      yield* orchestrator
+        .dispatch({
+          type: "subagent.stop",
+          commandId,
+          threadId,
+          runId: run.id,
+          subagentId: subagent.id,
+        })
+        .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true));
+      assert.isNotNull((yield* projections.getThread(subagent.childThreadId!)).humanTouchedAt);
       assert.deepEqual(yield* threadState(threadId), stateBefore);
       const effects = yield* sql<{ payload_json: string }>`
       SELECT payload_json FROM orchestration_v2_effect_outbox WHERE command_id = ${commandId}

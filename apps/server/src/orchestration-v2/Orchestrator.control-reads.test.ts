@@ -1667,3 +1667,102 @@ it.effect("dispatch records the command outcome and its duration", () =>
     assert.strictEqual((yield* durations).count - durationsBefore, 1);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect.each(["visit", "rename", "legacy visit"] as const)(
+  "human %s permanently excludes an agent thread from automatic settlement",
+  (action) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make(`human-touch:${action}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create:${threadId}`),
+        threadId,
+        projectId: ProjectId.make("human-touch"),
+        title: "Agent work",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const completedAt = yield* DateTime.now;
+      yield* projections.apply({
+        id: EventId.make(`completed:${threadId}`),
+        type: "run.created",
+        threadId,
+        occurredAt: completedAt,
+        payload: {
+          id: RunId.make(`run:${threadId}`),
+          threadId,
+          ordinal: 1,
+          providerInstanceId: instanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make(`prompt:${threadId}`),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: "completed",
+          requestedAt: completedAt,
+          startedAt: completedAt,
+          completedAt,
+          checkpointId: null,
+          contextHandoffId: null,
+        },
+      });
+      const snapshot = yield* projections.getThread(threadId);
+      yield* TestClock.adjust("1 minute");
+      const now = yield* DateTime.now;
+      const touch =
+        action === "rename"
+          ? { type: "thread.metadata.update" as const, title: "Human work" }
+          : { type: "thread.visit" as const, visitedAt: DateTime.formatIso(now) };
+      yield* orchestrator
+        .dispatch({
+          ...touch,
+          commandId: CommandId.make(`touch:${threadId}`),
+          threadId,
+        })
+        .pipe(
+          Effect.provideService(Orchestrator.HumanThreadInteraction, action !== "legacy visit"),
+        );
+      const touched = yield* projections.getThread(threadId);
+      if (action !== "legacy visit") {
+        assert.deepEqual(touched.humanTouchedAt, now);
+        assert.deepEqual((yield* projections.getThreadShell(threadId))?.humanTouchedAt, now);
+      }
+      if (action !== "rename") assert.deepEqual(touched.updatedAt, snapshot.updatedAt);
+      yield* orchestrator.dispatch({
+        type: "thread.auto-settle.set",
+        commandId: CommandId.make(`reenable:${threadId}`),
+        threadId,
+        enabled: true,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.mark-unread",
+        commandId: CommandId.make(`unread:${threadId}`),
+        threadId,
+      });
+      assert.deepEqual(yield* projections.getSettlementCandidates(threadId), []);
+      const latest = yield* projections.getThread(threadId);
+      assert.deepEqual(latest.humanTouchedAt, touched.humanTouchedAt);
+      const refused = yield* orchestrator
+        .dispatch({
+          type: "thread.auto-settle",
+          commandId: CommandId.make(`auto-settle:${threadId}`),
+          threadId,
+          snapshotAt: latest.updatedAt,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(refused, Orchestrator.OrchestratorDispatchError);
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make(`manual-settle:${threadId}`),
+        threadId,
+      });
+      assert.equal((yield* projections.getThread(threadId)).settledOverride, "settled");
+    }).pipe(Effect.provide(layerTest)),
+);

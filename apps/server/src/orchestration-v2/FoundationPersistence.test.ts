@@ -223,7 +223,7 @@ it.effect("discovers on the reader worker and deletes on the writer", () =>
       );
       const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
       const result = yield* maintenance.pruneEventStore();
-      assert.equal(result.deletedEventCount, 150);
+      assert.equal(result.deletedEventCount, 149);
       assert.equal(result.deletedReceiptCount, 100);
       // Only the in-transaction check for rows appended during the pass reads on the writer.
       assert.deepEqual(
@@ -322,6 +322,7 @@ it.effect("paces scheduled compaction while preserving retention state and fixed
     );
     // 151 stopped being the stream head when 152 committed mid-pass; 152 is past the bound.
     assert.deepEqual(yield* sql`SELECT sequence FROM orchestration_events ORDER BY sequence`, [
+      { sequence: 2 },
       { sequence: 152 },
     ]);
     assert.deepEqual(yield* sql`SELECT command_id FROM orchestration_command_receipts`, [
@@ -1324,7 +1325,7 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
       const marked = yield* maintenance.pruneEventStore();
       yield* TestClock.adjust("1 day");
       const summary = yield* maintenance.pruneEventStore();
-      assert.isAtLeast(summary.deletedEventCount, 504);
+      assert.isAtLeast(summary.deletedEventCount, 503);
       assert.equal(marked.deletedReceiptCount + summary.deletedReceiptCount, 1);
 
       const remaining = yield* sql<{ readonly event_id: string }>`
@@ -1336,7 +1337,11 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
       `;
       assert.deepEqual(
         remaining.map((row) => row.event_id),
-        ["event:foundation-compact:create", "event:foundation-compact:tags-2"],
+        [
+          "event:foundation-compact:create",
+          "event:foundation-compact:visit-1",
+          "event:foundation-compact:tags-2",
+        ],
       );
 
       const remainingV1 = yield* sql<{ readonly stream_id: string }>`

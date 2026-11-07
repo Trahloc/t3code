@@ -163,7 +163,7 @@ cannot drag threads, and the Working section is off. Each device keeps its own c
 
 Choose **Settle thread** from its menu to move finished work out of the active list
 without deleting the conversation. **Un-settle thread** restores it to active work
-and prevents automatic settlement until new activity resumes the usual rules.
+and keeps it out of automatic settlement after later activity.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
@@ -185,20 +185,18 @@ settle every thread in that section between it and the one you release on.
 The **Un-settle** and **Wake** buttons work the same way in their sections.
 Press `Escape` while dragging to cancel.
 
-By default, environments settle inactive threads after seven days and settle
-threads whose pull request merged. A closed pull request can also settle an idle
-thread. An empty thread's inactivity counts from when it was created.
-Work in progress, pending questions or approvals, and background work the agent
-is waiting on prevent automatic settlement. An open pull request does not prevent inactivity
-settlement unless you turn on **Keep threads with a PR** in **Settings → Threads**,
-but an old closed or merged pull request does not settle work you
-resumed after it closed. Only your own messages count as resuming. A turn that
-finished background work or a pull request watch starts on its own does not.
+Automatic settlement applies only to agent-created threads that no human has touched.
+Creating, opening, writing in, or changing a thread keeps it out of automatic settlement permanently.
+Later agent activity and PR merges do not remove that protection. Manual settlement remains available.
 
-To keep one thread out of the settled shelf no matter how long it sits idle, open its menu,
-choose **Auto-settle behavior**, and pick **Disabled**. The current option is checked. Pick
-**Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
-is disabled.
+Eligible agent threads follow the inactivity and PR rules in **Settings → Threads**.
+Work in progress, pending questions or approvals, and background work the agent
+is waiting on prevent automatic settlement. An open PR prevents inactivity settlement
+when **Keep threads with a PR** is enabled.
+
+To disable automatic settlement for an eligible agent thread, open its menu,
+choose **Auto-settle behavior**, and pick **Disabled**. Manual settle, snooze, and archive still work.
+Enabling the option does not remove protection from human interaction.
 
 Change these rules in **Settings → Threads**.
 They continue to run when your apps are closed. On web and desktop, choose an environment at the

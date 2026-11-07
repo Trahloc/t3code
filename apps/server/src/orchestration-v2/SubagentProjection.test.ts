@@ -135,6 +135,8 @@ it.effect.each(["provider", "mcp"] as const)(
         pinnedAt: parentCreatedAt,
         pinOrderKey: "a0",
         autoSettleDisabledAt: parentCreatedAt,
+        humanTouchedAt: parentCreatedAt,
+        opens: { openedAt: 1, score: 1, picks: [] },
       };
       const childThread = makeSubagentChildThread({
         parentThread,
@@ -154,6 +156,8 @@ it.effect.each(["provider", "mcp"] as const)(
       assert.isNull(childThread.pinnedAt);
       assert.isNull(childThread.pinOrderKey);
       assert.isNull(childThread.autoSettleDisabledAt);
+      assert.isNull(childThread.humanTouchedAt);
+      assert.isNull(childThread.opens);
 
       for (const thread of [parentThread, childThread]) {
         yield* store.apply({

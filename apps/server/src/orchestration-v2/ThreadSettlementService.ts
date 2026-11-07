@@ -145,9 +145,18 @@ function pullRequestSettles(
 }
 
 export function isAutoSettlementCandidate(
-  thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">,
+  thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt"> & {
+    readonly latestUserAuthoredMessageAt?: DateTime.Utc | null | undefined;
+  },
   nowMs: number,
 ): boolean {
+  if (thread.createdBy !== "agent") return false;
+  if (
+    thread.humanTouchedAt != null ||
+    thread.opens != null ||
+    thread.latestUserAuthoredMessageAt != null
+  )
+    return false;
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
