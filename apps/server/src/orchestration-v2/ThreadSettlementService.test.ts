@@ -72,8 +72,8 @@ function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
       relationshipToParent: null,
     },
     forkedFrom: null,
-    createdBy: "user",
-    creationSource: "web",
+    createdBy: "agent",
+    creationSource: "mcp",
     activeRunId: null,
     latestVisibleMessage: null,
     hasActionableProposedPlan: false,
@@ -92,7 +92,7 @@ function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
     latestRunStartedAt: null,
     latestRunCompletedAt: null,
     latestUserMessageAt: null,
-    latestUserAuthoredMessageAt: overrides.latestUserMessageAt ?? null,
+    latestUserAuthoredMessageAt: null,
     createdAt: at(-30 * DAY_MS),
     updatedAt: at(-10 * DAY_MS),
     archivedAt: null,
@@ -133,6 +133,35 @@ function persistedLink(
 }
 
 describe("isAutoSettlementCandidate", () => {
+  it.each([
+    ["human-created", { createdBy: "user" }],
+    ["system-created", { createdBy: "system" }],
+    ["human message", { createdBy: "agent", latestUserAuthoredMessageAt: at(-20 * DAY_MS) }],
+    ["human action", { humanTouchedAt: at(-20 * DAY_MS) }],
+    ["human open", { createdBy: "agent", opens: { openedAt: NOW_MS, score: 1, picks: [] } }],
+  ] satisfies ReadonlyArray<readonly [string, Partial<SettlementShell>]>)(
+    "keeps %s threads out of every automatic settlement rule",
+    (_, overrides) => {
+      const thread = shell(overrides);
+      expect(ThreadSettlementService.isAutoSettlementCandidate(thread, NOW_MS)).toBe(false);
+      for (const pullRequest of [
+        null,
+        { state: "merged" as const, mergedAt: DateTime.formatIso(at(-1)) },
+        { state: "closed" as const, closedAt: DateTime.formatIso(at(-1)) },
+      ]) {
+        expect(
+          ThreadSettlementService.resolveAutoSettlementAt({
+            thread,
+            pullRequest,
+            nowMs: NOW_MS,
+            autoSettleAfterDays: 3,
+            autoSettleOnMerge: true,
+          }),
+        ).toBeNull();
+      }
+    },
+  );
+
   it("settles a thread whose only background work is a command left running", () => {
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
@@ -344,7 +373,7 @@ describe("resolveAutoSettlementAt", () => {
     ).toEqual(at(-1_000));
   });
 
-  it("settles on merge only after the user's last action and preserves the activity time", () => {
+  it("settles after thread creation and preserves the latest activity time", () => {
     const thread = shell({
       latestUserMessageAt: at(-2 * 60 * 60 * 1_000),
       latestRunCompletedAt: at(-90 * 60 * 1_000),
@@ -366,7 +395,7 @@ describe("resolveAutoSettlementAt", () => {
     expect(
       ThreadSettlementService.resolveAutoSettlementAt({
         ...input,
-        pullRequest: { state: "merged", mergedAt: DateTime.formatIso(at(-3 * 60 * 60 * 1_000)) },
+        pullRequest: { state: "merged", mergedAt: DateTime.formatIso(at(-31 * DAY_MS)) },
       }),
     ).toBeNull();
     expect(
@@ -382,7 +411,7 @@ describe("resolveAutoSettlementAt", () => {
   it("settles on merge after agent-started runs, but not after the user writes again", () => {
     const woken = shell({
       latestUserMessageAt: at(-30 * 60 * 1_000),
-      latestUserAuthoredMessageAt: at(-2 * 60 * 60 * 1_000),
+      latestUserAuthoredMessageAt: null,
       latestRunRequestedAt: at(-30 * 60 * 1_000),
       latestRunCompletedAt: at(-29 * 60 * 1_000),
     });
@@ -397,7 +426,7 @@ describe("resolveAutoSettlementAt", () => {
     expect(
       ThreadSettlementService.resolveAutoSettlementAt({
         ...input,
-        thread: { ...woken, latestUserAuthoredMessageAt: at(-30 * 60 * 1_000) },
+        thread: { ...woken, latestUserAuthoredMessageAt: at(-2 * 60 * 60 * 1_000) },
       }),
     ).toBeNull();
   });

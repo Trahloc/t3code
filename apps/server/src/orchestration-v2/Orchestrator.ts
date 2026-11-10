@@ -359,6 +359,11 @@ export const OrchestratorV2Error = Schema.Union([
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
 
+export const HumanThreadInteraction = Context.Reference<boolean>(
+  "t3/orchestration-v2/HumanThreadInteraction",
+  { defaultValue: () => false },
+);
+
 export interface OrchestratorV2DispatchResult {
   readonly sequence: number;
   readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;
@@ -3362,6 +3367,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) {
+    const humanInteraction = yield* HumanThreadInteraction;
     const thread = yield* projectionStore.getThread(command.threadId).pipe(
       Effect.mapError(
         (cause) =>
@@ -3492,7 +3498,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.type === "thread.pin.reorder" ||
         command.type === "thread.active.reorder" ||
         command.type === "thread.pull-request.sync") &&
-      thread.archivedAt !== null
+      thread.archivedAt !== null &&
+      !(command.type === "thread.auto-settle.set" && humanInteraction)
     ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -3853,7 +3860,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             autoSettleDisabledAt: command.enabled ? null : (thread.autoSettleDisabledAt ?? now),
-            updatedAt: unchanged ? thread.updatedAt : now,
+            ...(humanInteraction ? { humanTouchedAt: thread.humanTouchedAt ?? now } : {}),
+            updatedAt: humanInteraction || unchanged ? thread.updatedAt : now,
           };
         }
         case "thread.pin": {
@@ -13455,6 +13463,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
         if (
           thread.settledOverride !== null ||
+          (yield* projectionStore
+            .getSettlementCandidates(command.threadId)
+            .pipe(mapDispatchError(command))).length === 0 ||
           DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt)
         ) {
           return yield* new OrchestratorDispatchError({
@@ -14105,10 +14116,57 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   }, withCommandMetrics);
 
   // dispatchWithReceiptEffect owns the dispatch span; this wrapper selects the thread locks.
-  const dispatchWithReceipt = Effect.fnUntraced(function* (command: OrchestrationV2ServerCommand) {
+  const dispatchWithReceipt: OrchestratorV2Shape["dispatch"] = Effect.fnUntraced(function* (
+    command: OrchestrationV2ServerCommand,
+  ) {
+    const humanInteraction =
+      (yield* HumanThreadInteraction) ||
+      command.type === "thread.guest-share.redeem" ||
+      command.type === "thread.guest-message.submit" ||
+      ("createdBy" in command &&
+        command.createdBy === "user" &&
+        (command.creationSource === "web" || command.creationSource === "mobile"));
+    if (humanInteraction && command.type !== "thread.auto-settle.set") {
+      const touchedIds =
+        command.type === "thread.fork" || command.type === "thread.merge_back"
+          ? [command.sourceThreadId, command.targetThreadId]
+          : [commandThreadId(command)];
+      if (command.type === "subagent.stop") {
+        const records = yield* projectionStore
+          .getThreadRecords(command.threadId, ["subagents"], {
+            subagentIds: [command.subagentId],
+          })
+          .pipe(mapDispatchError(command));
+        const childThreadId = records.subagents.find(
+          (task) => task.id === command.subagentId,
+        )?.childThreadId;
+        if (childThreadId != null) touchedIds.push(childThreadId);
+      }
+      for (const threadId of new Set(touchedIds)) {
+        const thread = yield* findThread(threadId);
+        if (
+          thread === null ||
+          thread.createdBy !== "agent" ||
+          thread.humanTouchedAt != null ||
+          thread.deletedAt !== null
+        )
+          continue;
+        yield* dispatchWithReceipt({
+          type: "thread.auto-settle.set",
+          commandId: CommandId.make(`${command.commandId}:human-touch:${threadId}`),
+          threadId,
+          enabled: false,
+        }).pipe(Effect.provideService(HumanThreadInteraction, true));
+      }
+    }
     const dispatch = threadDispatch.withLock(
       commandThreadId(command),
-      dispatchWithReceiptEffect(command),
+      dispatchWithReceiptEffect(command).pipe(
+        Effect.provideService(
+          HumanThreadInteraction,
+          command.type === "thread.auto-settle.set" && (yield* HumanThreadInteraction),
+        ),
+      ),
     );
     // A parent's lock comes before its side chats' locks, so a delete cascade and a side chat
     // fork or command never interleave. A fork from a side chat or onto an existing thread would

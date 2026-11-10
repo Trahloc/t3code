@@ -40,8 +40,8 @@ const createThread = Effect.fn(function* (
   const store = yield* ProjectionStore.ProjectionStoreV2;
   const threadId = ThreadId.make(`thread:settlement:${name}`);
   const thread: OrchestrationV2AppThread = {
-    createdBy: "user",
-    creationSource: "web",
+    createdBy: "agent",
+    creationSource: "mcp",
     id: threadId,
     projectId: ProjectId.make("project:settlement"),
     title: name,
@@ -225,6 +225,10 @@ it.effect(
         ["unsettled", { settledOverride: "active" }],
         ["pinned", { pinnedAt: old }],
         ["auto-settle-disabled", { autoSettleDisabledAt: old }],
+        ["human-created", { createdBy: "user" }],
+        ["system-created", { createdBy: "system" }],
+        ["human-touched", { humanTouchedAt: old }],
+        ["human-opened", { opens: { openedAt: DateTime.toEpochMillis(old), score: 1, picks: [] } }],
       ] satisfies ReadonlyArray<readonly [string, Partial<OrchestrationV2AppThread>]>) {
         yield* createRun(yield* createThread(name, overrides));
       }
@@ -401,12 +405,7 @@ it.effect("sql: the user-authored message time ignores agent notifications", () 
     yield* message("notification", "agent", "provider", now);
 
     const [candidate] = yield* store.getSettlementCandidates(threadId);
-    assert.isDefined(candidate);
-    assert.equal(DateTime.formatIso(candidate.latestUserMessageAt!), DateTime.formatIso(now));
-    assert.equal(
-      DateTime.formatIso(candidate.latestUserAuthoredMessageAt!),
-      DateTime.formatIso(written),
-    );
+    assert.isUndefined(candidate);
     const shellThread = (yield* store.getShellSnapshot()).threads.find(
       (thread) => thread.id === threadId,
     );

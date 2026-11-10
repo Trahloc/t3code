@@ -2495,7 +2495,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* seedProject(project);
       const create = {
         type: "thread.create" as const,
-        createdBy: "user" as const,
+        createdBy: "agent" as const,
         creationSource: "web" as const,
         commandId: CommandId.make("runtime-layer-lifecycle-create"),
         threadId,
@@ -3109,7 +3109,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const threadId = ThreadId.make(`pr-watch-settle-${mode}`);
       yield* orchestrator.dispatch({
         type: "thread.create",
-        createdBy: "user",
+        createdBy: mode === "automatic" ? "agent" : "user",
         creationSource: "web",
         commandId: CommandId.make(`pr-watch-settle-create-${mode}`),
         threadId,
@@ -7405,8 +7405,11 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
       const projections = yield* ProjectionStore.ProjectionStoreV2.pipe(
         Effect.provide(ProjectionStore.layer),
       );
-      const [candidate] = yield* projections.getSettlementCandidates(threadId);
-      assert.deepEqual(candidate?.lastSnoozeWakeAt, yield* DateTime.now);
+      assert.deepEqual(yield* projections.getSettlementCandidates(threadId), []);
+      assert.deepEqual(
+        (yield* projections.getThread(threadId)).lastSnoozeWakeAt,
+        yield* DateTime.now,
+      );
       yield* orchestrator.dispatch({
         type: "thread.settle",
         commandId: CommandId.make("runtime-layer-snoozed-thread-settle"),

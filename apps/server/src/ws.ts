@@ -24,6 +24,8 @@ import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import {
   AcpRegistryOperationError,
   CommandId,
+  OrchestrationV2StopWorkflowError,
+  OrchestrationV2ForceStopThreadError,
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
@@ -1458,6 +1460,37 @@ export const layerWsRpc = (
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
       const random = yield* SecureRandom.SecureRandom;
       // RPC client ids are only unique within one socket; terminals share viewers across sockets.
+      const recordHumanThreadInteraction = Effect.fn("ws.recordHumanThreadInteraction")(function* (
+        threadId: ThreadId,
+        subagentId?: import("@t3tools/contracts").NodeId,
+      ): Effect.fn.Return<void, Orchestrator.OrchestratorV2Error> {
+        if (subagentId !== undefined) {
+          const records = yield* orchestrationEngine.getThreadRecords(threadId, ["subagents"], {
+            subagentIds: [subagentId],
+          });
+          const childThreadId = records.subagents.find(
+            (task) => task.id === subagentId,
+          )?.childThreadId;
+          if (childThreadId != null && childThreadId !== threadId)
+            yield* recordHumanThreadInteraction(childThreadId);
+        }
+        const thread = yield* orchestrationEngine.getThreadShell(threadId);
+        if (
+          thread === null ||
+          thread.deletedAt !== null ||
+          thread.createdBy !== "agent" ||
+          thread.humanTouchedAt != null
+        )
+          return;
+        yield* orchestrationEngine
+          .dispatch({
+            type: "thread.auto-settle.set",
+            commandId: CommandId.make(`client:human-touch:${yield* random.uuidV4()}`),
+            threadId,
+            enabled: false,
+          })
+          .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true));
+      });
       const terminalViewerPrefix = yield* random.uuidV4();
       const terminalViewerId = (metadata: { readonly client: { readonly id: number } }) =>
         `${terminalViewerPrefix}:${metadata.client.id}`;
@@ -2081,7 +2114,10 @@ export const layerWsRpc = (
                             "creationSource" in command ? command.creationSource : "web",
                         }),
                       )
-                  ).pipe(Effect.provide(intakeContext)),
+                  ).pipe(
+                    Effect.provideService(Orchestrator.HumanThreadInteraction, true),
+                    Effect.provide(intakeContext),
+                  ),
                 )
                 .pipe(
                   Effect.tap((result) =>
@@ -2101,9 +2137,22 @@ export const layerWsRpc = (
                 ),
             ),
           ),
-        [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
+        [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) =>
+          recordHumanThreadInteraction(input.threadId, input.subagentId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2StopWorkflowError({ ...input, reason: "unavailable", cause }),
+            ),
+            Effect.andThen(threadManagement.stopWorkflow(input)),
+          ),
         [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: (input) =>
-          threadManagement.forceStopThread(input),
+          recordHumanThreadInteraction(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2ForceStopThreadError({ threadId: input.threadId, cause }),
+            ),
+            Effect.andThen(threadManagement.forceStopThread(input)),
+          ),
         [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
           readWorkflowScript({ scriptPath: input.scriptPath }),
         [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: (input) =>
@@ -2276,7 +2325,10 @@ export const layerWsRpc = (
                         }),
                     createdBy: "user",
                     creationSource: input.creationSource ?? "web",
-                  }).pipe(Effect.provide(intakeContext)),
+                  }).pipe(
+                    Effect.provideService(Orchestrator.HumanThreadInteraction, true),
+                    Effect.provide(intakeContext),
+                  ),
                 )
                 .pipe(
                   // A resumed launch is a retry of one already counted.
@@ -2371,11 +2423,19 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.guestShareCreate]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-            Effect.andThen(guestShares.create(input)),
+            Effect.andThen(
+              guestShares
+                .create(input)
+                .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true)),
+            ),
           ),
         [WS_METHODS.secretsAnswerRequest]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-            Effect.andThen(secretRequests.answer(input)),
+            Effect.andThen(
+              secretRequests
+                .answer(input)
+                .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true)),
+            ),
           ),
         [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
@@ -2708,7 +2768,11 @@ export const layerWsRpc = (
           peerLinks.unlink(environmentId).pipe(Effect.map((removed) => ({ removed }))),
         [WS_METHODS.peerLinksAnswerRequest]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-            Effect.andThen(peerLinkRequests.answer(input)),
+            Effect.andThen(
+              peerLinkRequests
+                .answer(input)
+                .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true)),
+            ),
           ),
         [WS_METHODS.serverUpdateSettings]:
           /* Request instrumentation already owns the span; keep this helper in that context. */

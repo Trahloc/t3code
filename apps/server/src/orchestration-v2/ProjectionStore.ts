@@ -209,6 +209,9 @@ export type ProjectionSettlementCandidate = Pick<
   | "settledOverride"
   | "pinnedAt"
   | "autoSettleDisabledAt"
+  | "humanTouchedAt"
+  | "createdBy"
+  | "opens"
   | "snoozedUntil"
   | "snoozedAt"
   | "latestRunId"
@@ -1698,6 +1701,7 @@ export function threadShellFromProjection(
     pinnedAt: projection.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
+    humanTouchedAt: projection.thread.humanTouchedAt ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     ...(projection.thread.tags?.length ? { tags: projection.thread.tags } : {}),
     lastVisitedAt: projection.thread.lastVisitedAt,
@@ -1964,6 +1968,7 @@ function shellFromState(input: {
     pinnedAt: input.state.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
+    humanTouchedAt: input.state.thread.humanTouchedAt ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     ...(input.state.thread.tags?.length ? { tags: input.state.thread.tags } : {}),
     lastVisitedAt: input.state.thread.lastVisitedAt,
@@ -6615,6 +6620,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
               AND json_extract(t.payload_json, '$.autoSettleDisabledAt') IS NULL
+              AND json_extract(t.payload_json, '$.createdBy') = 'agent'
+              AND json_extract(t.payload_json, '$.humanTouchedAt') IS NULL
+              AND json_extract(t.payload_json, '$.opens') IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_messages human
+                WHERE human.thread_id = t.thread_id AND human.role = 'user'
+                  AND json_extract(human.payload_json, '$.createdBy') = 'user'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_events visit
+                WHERE visit.aggregate_kind = 'thread' AND visit.stream_id = t.thread_id
+                  AND visit.application_event_version = 2 AND visit.event_type = 'thread.visited'
+              )
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
