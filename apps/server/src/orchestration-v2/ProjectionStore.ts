@@ -6,6 +6,7 @@ import * as Stream from "effect/Stream";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { makeThreadFind } from "./ThreadFind.ts";
 import type {
+  OrchestrationV2ThreadLinkMetadata,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -208,6 +209,9 @@ export type ProjectionSettlementCandidate = Pick<
   | "settledOverride"
   | "pinnedAt"
   | "autoSettleDisabledAt"
+  | "humanTouchedAt"
+  | "createdBy"
+  | "opens"
   | "snoozedUntil"
   | "snoozedAt"
   | "latestRunId"
@@ -562,6 +566,9 @@ export interface ProjectionStoreV2Shape {
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
   /** Titles of the given threads that exist, archived ones included. */
+  readonly getThreadLinkMetadata: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<Record<ThreadId, OrchestrationV2ThreadLinkMetadata>, ProjectionStoreV2Error>;
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<Record<ThreadId, string>, ProjectionStoreV2Error>;
@@ -1008,6 +1015,7 @@ export type AgentAwarenessThread = ProjectThreadAwarenessV2Input["thread"] &
   Pick<
     OrchestrationV2ThreadShell,
     | "projectId"
+    | "creationSource"
     | "latestRunCompletedAt"
     | "archivedAt"
     | "activeRunId"
@@ -1693,6 +1701,7 @@ export function threadShellFromProjection(
     pinnedAt: projection.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
+    humanTouchedAt: projection.thread.humanTouchedAt ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     ...(projection.thread.tags?.length ? { tags: projection.thread.tags } : {}),
     lastVisitedAt: projection.thread.lastVisitedAt,
@@ -1959,6 +1968,7 @@ function shellFromState(input: {
     pinnedAt: input.state.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
+    humanTouchedAt: input.state.thread.humanTouchedAt ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     ...(input.state.thread.tags?.length ? { tags: input.state.thread.tags } : {}),
     lastVisitedAt: input.state.thread.lastVisitedAt,
@@ -6610,6 +6620,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
               AND json_extract(t.payload_json, '$.autoSettleDisabledAt') IS NULL
+              AND json_extract(t.payload_json, '$.createdBy') = 'agent'
+              AND json_extract(t.payload_json, '$.humanTouchedAt') IS NULL
+              AND json_extract(t.payload_json, '$.opens') IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_messages human
+                WHERE human.thread_id = t.thread_id AND human.role = 'user'
+                  AND json_extract(human.payload_json, '$.createdBy') = 'user'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_events visit
+                WHERE visit.aggregate_kind = 'thread' AND visit.stream_id = t.thread_id
+                  AND visit.application_event_version = 2 AND visit.event_type = 'thread.visited'
+              )
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
@@ -7169,6 +7192,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             Effect.map((state): AgentAwarenessThread => ({
               id: state.thread.id,
               projectId: state.thread.projectId,
+              creationSource: state.thread.creationSource,
               archivedAt: state.thread.archivedAt,
               activeRunId: state.activeRunId,
               latestRunId: state.latestRunId,
@@ -7304,6 +7328,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         snoozedUntil: row.snoozed_until === null ? null : DateTime.makeUnsafe(row.snoozed_until),
         mayBeLive: row.may_be_live === 1,
       }));
+    }, Effect.mapError(shellSnapshotReadError));
+
+    const getThreadLinkMetadata = Effect.fn("ProjectionStore.getThreadLinkMetadata")(function* (
+      threadIds: ReadonlyArray<ThreadId>,
+    ) {
+      if (threadIds.length === 0) return {};
+      const rows = yield* sql<{
+        readonly thread_id: ThreadId;
+        readonly title: string;
+        readonly project_id: ProjectId;
+      }>`
+        SELECT thread_id, title, project_id
+        FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL AND thread_id IN ${sql.in(threadIds)}
+      `;
+      return Object.fromEntries(
+        rows.map((row) => [row.thread_id, { title: row.title, projectId: row.project_id }]),
+      );
     }, Effect.mapError(shellSnapshotReadError));
 
     const getThreadTitles = Effect.fn("ProjectionStore.getThreadTitles")(function* (
@@ -7485,6 +7527,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),
       getThreadTitles: readOnReader(getThreadTitles),
+      getThreadLinkMetadata: readOnReader(getThreadLinkMetadata),
       getThreadWorktreePaths: readOnReader(getThreadWorktreePaths),
       getOpenRemoteDelegatedTasks: getOpenRemoteDelegatedTasks.pipe(NodeSqliteClient.readOnly),
       getThreadProjection: readOnReader(getThreadProjection),

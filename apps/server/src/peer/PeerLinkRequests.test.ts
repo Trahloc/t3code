@@ -555,7 +555,7 @@ it.live("the agent asks without waiting, and the user links the box after its tu
       ).toBeNull();
       expect(
         (yield* a.projections.getSettlementCandidates(threadId)).map((thread) => thread.id),
-      ).toEqual([threadId]);
+      ).toEqual([]);
       expect(yield* cardOf(a)).toMatchObject({ status: "waiting", linkStatus: "pending" });
 
       yield* a.orchestrator.dispatch({

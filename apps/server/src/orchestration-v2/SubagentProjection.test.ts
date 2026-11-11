@@ -135,6 +135,8 @@ it.effect.each(["provider", "mcp"] as const)(
         pinnedAt: parentCreatedAt,
         pinOrderKey: "a0",
         autoSettleDisabledAt: parentCreatedAt,
+        humanTouchedAt: parentCreatedAt,
+        opens: { openedAt: 1, score: 1, picks: [] },
       };
       const childThread = makeSubagentChildThread({
         parentThread,
@@ -154,6 +156,8 @@ it.effect.each(["provider", "mcp"] as const)(
       assert.isNull(childThread.pinnedAt);
       assert.isNull(childThread.pinOrderKey);
       assert.isNull(childThread.autoSettleDisabledAt);
+      assert.isNull(childThread.humanTouchedAt);
+      assert.isNull(childThread.opens);
 
       for (const thread of [parentThread, childThread]) {
         yield* store.apply({
@@ -413,6 +417,14 @@ it("orders a task's assistant messages by turn item, not by timestamps", () => {
   assert.equal(result.text, "All steps passed.");
   assert.equal(result.messageId, report.message.id);
   assert.equal(result.turnItemId, report.turnItem.id);
+  const reported = { runAttemptId: run.activeAttemptId, ordinal: 1, model: "gpt-5.4-mini" };
+  assert.equal(
+    subagentResultForRun(
+      { ...projection, messages: [report.message], providerTurns: [reported as never] },
+      run,
+    ).text,
+    "Requested model gpt-5.4; the provider reported running gpt-5.4-mini.\n\nAll steps passed.",
+  );
 });
 
 it.effect("ends an orphaned native subagent's node when only its record already ended", () =>
