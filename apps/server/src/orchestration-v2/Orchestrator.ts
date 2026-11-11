@@ -14127,20 +14127,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.createdBy === "user" &&
         (command.creationSource === "web" || command.creationSource === "mobile"));
     if (humanInteraction && command.type !== "thread.auto-settle.set") {
-      // Refused native-child sends and watches must not commit human-touch metadata.
-      // Keep the command's existing admission guard under its dispatch lock as well.
-      if (
-        command.type === "message.dispatch" ||
-        (command.type === "thread.pull-request.watch" && command.watching)
-      ) {
-        const thread = yield* findThread(command.threadId);
-        if (thread !== null && isProviderNativeSubagentThread(thread)) {
-          return yield* new OrchestratorSubagentThreadReadOnlyError({
-            commandId: command.commandId,
-            threadId: command.threadId,
-          });
-        }
-      }
       const touchedIds =
         command.type === "thread.fork" || command.type === "thread.merge_back"
           ? [command.sourceThreadId, command.targetThreadId]
@@ -14158,6 +14144,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       for (const threadId of new Set(touchedIds)) {
         const thread = yield* findThread(threadId);
+        // Refused native-child sends and watches must not commit human-touch metadata.
+        if (
+          thread !== null &&
+          isProviderNativeSubagentThread(thread) &&
+          (command.type === "message.dispatch" ||
+            (command.type === "thread.pull-request.watch" && command.watching))
+        ) {
+          return yield* new OrchestratorSubagentThreadReadOnlyError({
+            commandId: command.commandId,
+            threadId,
+          });
+        }
         if (
           thread === null ||
           thread.createdBy !== "agent" ||

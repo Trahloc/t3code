@@ -8,10 +8,14 @@ import {
   type ProviderReplayEntry,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { vi } from "vite-plus/test";
 
 import { ClaudeOrchestratorReplayHarness } from "../Adapters/ClaudeAdapterV2.testkit.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Orchestrator from "../Orchestrator.ts";
+import * as ProjectionStore from "../ProjectionStore.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { userFacingDispatchErrorMessage } from "../UserFacingErrors.ts";
 import { provideDeterministicTestRuntime } from "./DeterministicRuntime.ts";
 import { subagentInput } from "./fixtures/subagent/input.ts";
@@ -70,6 +74,7 @@ describe("Claude Agent SDK replay fixtures", () => {
           steps: materialized.steps,
           projectionThreadIds: materialized.projectionThreadIds,
         };
+        const databaseLayer = SqlitePersistence.layerMemory;
         yield* Effect.gen(function* () {
           const result = yield* runOrchestratorV2Scenario(scenario);
           const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -111,12 +116,48 @@ describe("Claude Agent SDK replay fixtures", () => {
             .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true), Effect.flip);
           assert.equal(refusedWatch._tag, "OrchestratorSubagentThreadReadOnlyError");
           assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
+          const projections = yield* ProjectionStore.ProjectionStoreV2;
+          const getThread = projections.getThread;
+          let missingSnapshot = true;
+          // Model a provider publishing the child after the first missing-thread observation.
+          using _publication = vi.spyOn(projections, "getThread").mockImplementation((threadId) =>
+            Effect.suspend(() => {
+              if (threadId === child.thread.id && missingSnapshot) {
+                missingSnapshot = false;
+                return Effect.fail(
+                  new ProjectionStore.ProjectionStoreThreadNotFoundError({ threadId }),
+                );
+              }
+              return getThread(threadId);
+            }),
+          );
+          const refusedAfterPublication = yield* orchestrator
+            .dispatch({
+              type: "message.dispatch",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make("command:subagent:message-after-publication"),
+              threadId: child.thread.id,
+              messageId: MessageId.make("message:subagent:message-after-publication"),
+              text: "Also check the tests.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+            })
+            .pipe(Effect.flip);
+          assert.equal(refusedAfterPublication._tag, "OrchestratorSubagentThreadReadOnlyError");
+          assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
           const after = yield* orchestrator.getThreadProjection(child.thread.id);
           assert.lengthOf(after.runs, 0);
           assert.deepEqual(after.messages, child.messages);
         }).pipe(
           Effect.provide(
-            ProviderReplayHarness.layerProviderReplay(scenario, ClaudeOrchestratorReplayHarness),
+            Layer.mergeAll(
+              databaseLayer,
+              ProjectionStore.layer.pipe(Layer.provide(databaseLayer)),
+              ProviderReplayHarness.layerProviderReplay(scenario, ClaudeOrchestratorReplayHarness, {
+                databaseLayer,
+              }),
+            ),
           ),
           provideDeterministicTestRuntime,
           Effect.scoped,
