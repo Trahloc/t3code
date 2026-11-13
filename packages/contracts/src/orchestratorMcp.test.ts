@@ -4,12 +4,21 @@ import * as Schema from "effect/Schema";
 import {
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
+  OrchestratorMcpRequestSecretInput,
 } from "./orchestratorMcp.ts";
 
 const decodeDelegateTaskInput = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskInput);
 const decodeDelegateTaskResult = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskResult);
 
 describe("orchestrator MCP contracts", () => {
+  it("accepts secret requests lasting up to 24 hours", () => {
+    const decode = Schema.decodeUnknownSync(OrchestratorMcpRequestSecretInput);
+    const input = { label: "Administrator password", reason: "Apply the reviewed service limit." };
+    expect(decode({ ...input, timeoutMs: 86_400_000 }).timeoutMs).toBe(86_400_000);
+    expect(() => decode({ ...input, timeoutMs: 86_400_001 })).toThrow();
+    expect(() => decode({ ...input, timeoutMs: 999 })).toThrow();
+  });
+
   it("decodes cross-provider delegated task requests and durable results", () => {
     const request = decodeDelegateTaskInput({
       task: "Inspect the workspace and report the result.",

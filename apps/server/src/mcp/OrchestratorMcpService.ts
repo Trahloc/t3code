@@ -6,6 +6,7 @@ import {
   type ModelSelection,
   NodeId,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
+  SECRET_REQUEST_TIMEOUT_MS,
   TurnItemId,
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
@@ -2329,7 +2330,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.timeoutOption(
           Duration.millis(
-            Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
+            Math.min(input.timeoutMs ?? SECRET_REQUEST_TIMEOUT_MS, SECRET_REQUEST_TIMEOUT_MS),
           ),
         ),
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeCard)),

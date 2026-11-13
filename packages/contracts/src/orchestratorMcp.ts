@@ -32,7 +32,7 @@ import {
   ThreadPullRequestKey,
   ThreadPullRequestLinkSource,
 } from "./threadPullRequest.ts";
-import { secretRequestPageUrl } from "./secretRequest.ts";
+import { SECRET_REQUEST_TIMEOUT_MS, secretRequestPageUrl } from "./secretRequest.ts";
 import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
 import { LastThreadTitleRegeneration, ThreadTitleRegeneration } from "./threadTitle.ts";
 import {
@@ -805,10 +805,9 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
   value: Schema.optional(PastedSecretValue).annotate({
     description: "Pasted in this thread; no card.",
   }),
-  /** Default 10 minutes. */
   timeoutMs: Schema.optional(
-    Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
-  ),
+    Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: SECRET_REQUEST_TIMEOUT_MS })),
+  ).annotate({ description: "Milliseconds to wait. Default and maximum: 24 hours." }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
     description: "Retry key.",
   }),

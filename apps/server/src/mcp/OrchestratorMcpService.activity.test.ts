@@ -969,9 +969,20 @@ it("requestSecret saves a pasted value to a file without opening a card", async 
 });
 
 it("requestSecret returns the unsaved note for a declined, cancelled or timed-out card", async () => {
-  const outcomes = ["declined", "cancelled", "pending"] as const;
-  const results = await Effect.forEach(outcomes, (outcome) => {
-    const dispatched: Array<{ readonly type: string; readonly turnItemId?: string }> = [];
+  const outcomes = [
+    { status: "declined", timeoutMs: 1_000 },
+    { status: "cancelled", timeoutMs: 1_000 },
+    { status: "pending", timeoutMs: 1_000 },
+    { status: "pending", timeoutMs: undefined },
+    { status: "pending", timeoutMs: 86_400_000 },
+  ] as const;
+  const results = await Effect.forEach(outcomes, ({ status: outcome, timeoutMs }) => {
+    const longWait = timeoutMs === undefined || timeoutMs === 86_400_000;
+    const dispatched: Array<{
+      readonly type: string;
+      readonly turnItemId?: string;
+      readonly secretStatus?: string;
+    }> = [];
     const projection = () => {
       const card = dispatched.find((command) => command.type === "secret_request.record");
       return {
@@ -1001,7 +1012,12 @@ it("requestSecret returns the unsaved note for a declined, cancelled or timed-ou
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ThreadManagementService.ThreadManagementService)({
-            getThreadRecords: () => Effect.sync(projection),
+            getThreadRecords: () =>
+              longWait &&
+              dispatched.some((command) => command.secretStatus === "pending") &&
+              !dispatched.some((command) => command.secretStatus === "cancelled")
+                ? Effect.never
+                : Effect.sync(projection),
             getThreadShell: () =>
               Effect.sync(() => projection().thread as unknown as OrchestrationV2ThreadShell),
             dispatch: (command) => Effect.sync(() => void dispatched.push(command) as never),
@@ -1026,9 +1042,13 @@ it("requestSecret returns the unsaved note for a declined, cancelled or timed-ou
           label: "Staging password",
           reason: "Signs in the QA account.",
           delivery: "file",
-          timeoutMs: 1_000,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
         })
         .pipe(Effect.forkChild({ startImmediately: true }));
+      if (longWait) {
+        yield* TestClock.adjust(86_399_000);
+        expect(request.pollUnsafe()).toBeUndefined();
+      }
       yield* TestClock.adjust("2 seconds");
       return yield* Fiber.join(request);
     }).pipe(Effect.provide(Layer.merge(layer, TestClock.layer())));
@@ -1037,6 +1057,8 @@ it("requestSecret returns the unsaved note for a declined, cancelled or timed-ou
   expect(results).toEqual([
     { status: "declined", note: SECRET_REQUEST_UNSAVED_NOTE.declined },
     { status: "cancelled", note: SECRET_REQUEST_UNSAVED_NOTE.cancelled },
+    { status: "timed_out", note: SECRET_REQUEST_UNSAVED_NOTE.timed_out },
+    { status: "timed_out", note: SECRET_REQUEST_UNSAVED_NOTE.timed_out },
     { status: "timed_out", note: SECRET_REQUEST_UNSAVED_NOTE.timed_out },
   ]);
 });

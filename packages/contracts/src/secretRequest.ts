@@ -3,6 +3,8 @@ import * as Schema from "effect/Schema";
 import { ThreadId, TrimmedNonEmptyString, TurnItemId } from "./baseSchemas.ts";
 import { SecretReference } from "./secretReference.ts";
 
+export const SECRET_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
+
 /** The http(s) page a secret card may open, or null for anything else. */
 export function secretRequestPageUrl(value: string): URL | null {
   // React Native's URL has no `canParse`.
