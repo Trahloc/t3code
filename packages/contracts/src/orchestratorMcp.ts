@@ -198,6 +198,9 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
 export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTaskInput.Type;
 
 // Set only on results for still-running tasks whose completion will wake the parent.
+// Provider transports must outlast the longest tool wait.
+export const ORCHESTRATOR_MCP_TOOL_TIMEOUT_MS = SECRET_REQUEST_TIMEOUT_MS + 5 * 60 * 1_000;
+
 export const ORCHESTRATOR_MCP_RUNNING_TASK_NEXT =
   "Completion wakes this thread, so end your turn. Do not wait on it or poll it.";
 const OrchestratorMcpRunningTaskNext = Schema.Literal(ORCHESTRATOR_MCP_RUNNING_TASK_NEXT);

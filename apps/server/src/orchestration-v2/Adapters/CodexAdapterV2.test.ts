@@ -1799,13 +1799,13 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             "shell_environment_policy.set.T3CODE_THREAD_ID": `thread-${scenario}`,
             "mcp_servers.t3-code": {
               url: "http://127.0.0.1:43123/mcp",
-              tool_timeout_sec: 3_900,
+              tool_timeout_sec: 86_700,
               http_headers: { Authorization: "Bearer secret-codex-token" },
               disabled_tools: ["t3_thread_wait"],
             },
             "mcp_servers.t3-code-direct": {
               url: "http://127.0.0.1:43123/mcp",
-              tool_timeout_sec: 3_900,
+              tool_timeout_sec: 86_700,
               http_headers: { Authorization: "Bearer secret-codex-token" },
               enabled_tools: ["t3_thread_wait"],
               omit_tools_from: ["code_mode", "deferred"],

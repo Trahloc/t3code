@@ -592,7 +592,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       headers: {
         Authorization: "Bearer secret-claude-token",
       },
-      timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
+      timeout: 86_700_000,
     },
   } as const;
 
@@ -703,7 +703,7 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
           headers: {
             Authorization: "Bearer secret-claude-token",
           },
-          timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
+          timeout: 86_700_000,
         },
       },
     });

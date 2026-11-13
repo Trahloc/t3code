@@ -30,6 +30,7 @@ import {
 } from "../../provider/codexUsageLimits.ts";
 import {
   CodexSettings,
+  ORCHESTRATOR_MCP_TOOL_TIMEOUT_MS,
   defaultInstanceIdForDriver,
   isOrchestrationV2WorkActive,
   type OrchestrationV2GoalCommand,
@@ -1435,8 +1436,6 @@ export const CODEX_THREAD_CONFIG = {
   "features.concurrent_reasoning_summaries": true,
 } as const;
 
-// T3 waits can block for an hour; keep Codex's MCP timeout above that.
-const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 // Holds T3 tools Codex must call directly, never from Code Mode. Calls arrive as
 // `t3-code-direct.<tool>`; t3McpToolPresentation.ts must keep resolving that form.
 const CODEX_T3_DIRECT_MCP_SERVER = "t3-code-direct";
@@ -1458,7 +1457,7 @@ function codexThreadRuntimeParams(input: {
       ? undefined
       : {
           url: mcpSession.endpoint,
-          tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
+          tool_timeout_sec: ORCHESTRATOR_MCP_TOOL_TIMEOUT_MS / 1_000,
           http_headers: { Authorization: mcpSession.authorizationHeader },
         };
   return {
