@@ -1023,6 +1023,8 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const parent = appThread("subagent-parent", "settled");
         const child = (id: string, overrides: Partial<OrchestrationV2AppThread> = {}) => ({
           ...appThread(id, null),
+          createdBy: "agent" as const,
+          creationSource: "mcp" as const,
           branch: "feature",
           lineage: {
             rootThreadId: parent.id,
@@ -1041,6 +1043,8 @@ describe("ThreadSettlementServiceV2 worker", () => {
           recent,
           busy,
           marker,
+          child("human-created", { createdBy: "user" }),
+          child("human-touched", { humanTouchedAt: DateTime.makeUnsafe(NOW) }),
           child("pinned", { pinnedAt: DateTime.makeUnsafe(NOW) }),
           child("opted-out", { autoSettleDisabledAt: DateTime.makeUnsafe(NOW) }),
         ]) {
@@ -1141,6 +1145,8 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const parent = appThread("manual-parent", null);
         const child = {
           ...appThread("manual-child", null),
+          createdBy: "agent" as const,
+          creationSource: "mcp" as const,
           branch: "feature",
           lineage: {
             rootThreadId: parent.id,
@@ -1223,6 +1229,8 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const parent = appThread("bulk-parent", null);
         const child = {
           ...appThread("bulk-child", null),
+          createdBy: "agent" as const,
+          creationSource: "mcp" as const,
           lineage: {
             parentThreadId: parent.id,
             rootThreadId: parent.id,
@@ -1984,7 +1992,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
     }),
   );
 
-  it.effect("a merged branch PR that cannot settle its thread rereads no git state", () =>
+  it.effect("a human-authored thread skips merged branch PR lookups", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse(NOW));
       const freshReads = yield* Ref.make(0);
@@ -2015,7 +2023,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
         yield* Queue.take(fixture.snapshotReads);
         yield* reactor.drain;
 
-        assert.strictEqual((yield* Ref.get(fixture.branchCalls)).length, 2);
+        assert.strictEqual((yield* Ref.get(fixture.branchCalls)).length, 0);
         assert.strictEqual(yield* Ref.get(freshReads), 0);
         assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
       }).pipe(Effect.provide(fixture.layer));

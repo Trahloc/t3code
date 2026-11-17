@@ -3749,12 +3749,35 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         DateTime.toEpochMillis(untaggedShell.updatedAt),
       );
 
-      const preAutoProjection = yield* orchestrator.getThreadProjection(threadId);
+      const visitedThread = yield* orchestrator.getThreadProjection(threadId);
+      const refusedVisitedSettlement = yield* orchestrator
+        .dispatch({
+          type: "thread.auto-settle",
+          commandId: CommandId.make("runtime-layer-lifecycle-visited-settlement"),
+          threadId,
+          snapshotAt: visitedThread.thread.updatedAt,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(refusedVisitedSettlement, Orchestrator.OrchestratorDispatchError);
+      const autoThreadId = ThreadId.make("runtime-layer-lifecycle-untouched");
+      yield* orchestrator.dispatch({
+        ...create,
+        threadId: autoThreadId,
+        commandId: CommandId.make("runtime-layer-lifecycle-untouched-create"),
+        creationSource: "mcp",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.active.reorder",
+        commandId: CommandId.make("runtime-layer-lifecycle-untouched-order"),
+        threadId: autoThreadId,
+        orderKey: "a0",
+      });
+      const preAutoProjection = yield* orchestrator.getThreadProjection(autoThreadId);
       const staleAutoSettle = yield* orchestrator
         .dispatch({
           type: "thread.auto-settle",
           commandId: CommandId.make("runtime-layer-lifecycle-auto-settle-stale"),
-          threadId,
+          threadId: autoThreadId,
           snapshotAt: DateTime.makeUnsafe(
             DateTime.toEpochMillis(preAutoProjection.thread.updatedAt) - 1,
           ),
@@ -3764,24 +3787,24 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* orchestrator.dispatch({
         type: "thread.auto-settle",
         commandId: CommandId.make("runtime-layer-lifecycle-auto-settle"),
-        threadId,
+        threadId: autoThreadId,
         snapshotAt: preAutoProjection.thread.updatedAt,
       });
-      const autoSettledProjection = yield* orchestrator.getThreadProjection(threadId);
+      const autoSettledProjection = yield* orchestrator.getThreadProjection(autoThreadId);
       assert.equal(autoSettledProjection.thread.settledOverride, "settled");
       assert.isNull(autoSettledProjection.thread.activeOrderKey);
       yield* orchestrator.dispatch({
         type: "thread.unsettle",
         commandId: CommandId.make("runtime-layer-lifecycle-auto-unsettle"),
-        threadId,
+        threadId: autoThreadId,
         reason: "user",
       });
-      const postUnsettleProjection = yield* orchestrator.getThreadProjection(threadId);
+      const postUnsettleProjection = yield* orchestrator.getThreadProjection(autoThreadId);
       const overriddenAutoSettle = yield* orchestrator
         .dispatch({
           type: "thread.auto-settle",
           commandId: CommandId.make("runtime-layer-lifecycle-auto-settle-overridden"),
-          threadId,
+          threadId: autoThreadId,
           snapshotAt: postUnsettleProjection.thread.updatedAt,
         })
         .pipe(Effect.flip);
