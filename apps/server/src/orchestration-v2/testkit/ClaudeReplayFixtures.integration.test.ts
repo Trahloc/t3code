@@ -146,9 +146,25 @@ describe("Claude Agent SDK replay fixtures", () => {
             .pipe(Effect.flip);
           assert.equal(refusedAfterPublication._tag, "OrchestratorSubagentThreadReadOnlyError");
           assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
+          const refusedContinuation = yield* orchestrator
+            .dispatch({
+              type: "thread.metadata.update",
+              commandId: CommandId.make("command:subagent:continue-native-child"),
+              threadId: child.thread.id,
+              title: "Renamed",
+              continuation: {
+                messageId: MessageId.make("message:subagent:continue-native-child"),
+                text: "Also check the tests.",
+              },
+            })
+            .pipe(Effect.provideService(Orchestrator.HumanThreadInteraction, true), Effect.flip);
+          assert.equal(refusedContinuation._tag, "OrchestratorSubagentThreadReadOnlyError");
+          assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
           const after = yield* orchestrator.getThreadProjection(child.thread.id);
           assert.lengthOf(after.runs, 0);
           assert.deepEqual(after.messages, child.messages);
+          assert.equal(after.thread.title, child.thread.title);
+          assert.equal(after.thread.humanTouchedAt, child.thread.humanTouchedAt);
         }).pipe(
           Effect.provide(
             Layer.mergeAll(

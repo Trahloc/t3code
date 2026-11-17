@@ -126,10 +126,10 @@ export const layer: Layer.Layer<ProjectionMaintenanceV2, never, SqlClient.SqlCli
               -- The legacy importer treats a thread without thread.created as not yet imported.
               WHEN event.event_type = 'thread.created' THEN 0
               -- A historical human visit permanently excludes the thread from automatic settlement.
-              WHEN event.event_type = 'thread.visited' AND event.sequence = (
+              WHEN event.event_type IN ('thread.visited', 'thread.visit-recorded') AND event.sequence = (
                 SELECT MIN(visit.sequence) FROM orchestration_events visit
                 WHERE visit.aggregate_kind = event.aggregate_kind AND visit.stream_id = event.stream_id
-                  AND visit.event_type = 'thread.visited' AND visit.application_event_version = 2
+                  AND visit.event_type IN ('thread.visited', 'thread.visit-recorded') AND visit.application_event_version = 2
               ) THEN 0
               -- Codex usage history reads the selection a run attempt started with.
               WHEN event.event_type = 'run.updated'
